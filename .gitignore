@@ -1,0 +1,16 @@
+*.o
+*.a
+*.so
+*.d
+## this is to ignore
+## the test docker build(add to tests)
+docker/
+*.tmp
+*.swp
+# Test outputs just in case
+corpus/
+corpus_*/
+crash-*
+leak-*
+timeout-*
+EOF
