@@ -536,6 +536,21 @@ bool Fuzzer::RunOne(const uint8_t *Data, size_t Size, bool MayDeleteFile,
   if (NumNewFeatures || ForceAddToCorpus) {
     TPC.UpdateObservedPCs();
     size_t NumFocusFunctionsHit = TPC.CountObservedFocusFunctions();
+
+    // Dump execution path if tracing is active
+    if (!Options.TraceOutputDir.empty() && TPC.IsRecordingPath) {
+      TPC.DumpCurrentPath(Data, Size);
+    }
+
+    // Compute path distance from crash if crash path is loaded
+    size_t PathDistance = TPC.ComputePathDistance();
+
+    // Only keep inputs within threshold distance from crash path
+    if (!Options.CrashPathFile.empty() &&
+        PathDistance > (size_t)Options.PathDistanceThreshold) {
+      return false;  // Skip this input - too far from crash path
+    }
+
     auto NewII =
         Corpus.AddToCorpus({Data, Data + Size}, NumNewFeatures, MayDeleteFile,
                            TPC.ObservedFocusFunction(), ForceAddToCorpus,
@@ -872,6 +887,31 @@ void Fuzzer::Loop(std::vector<SizedFile> &CorporaFiles) {
            MD.GetRand());
   TPC.SetFocusFunction(FocusFunctionOrAuto);
   TPC.SetFocusFunctions(Options.FocusFunctions);
+
+  // Initialize path tracing if requested
+  if (!Options.TraceOutputDir.empty()) {
+    TPC.TraceOutputDir = Options.TraceOutputDir;
+    MkDirRecursive(Options.TraceOutputDir);
+    TPC.StartPathRecording();
+  }
+
+  // Parse and set trigger point if specified
+  if (!Options.TriggerPoint.empty()) {
+    size_t ColonPos = Options.TriggerPoint.find(':');
+    if (ColonPos != std::string::npos) {
+      std::string FuncName = Options.TriggerPoint.substr(0, ColonPos);
+      size_t CallID = std::atoi(Options.TriggerPoint.substr(ColonPos + 1).c_str());
+      TPC.SetTriggerPoint(FuncName, CallID);
+    } else {
+      Printf("WARNING: Invalid trigger_point format. Expected function_name:call_id\n");
+    }
+  }
+
+  // Load crash path if specified
+  if (!Options.CrashPathFile.empty()) {
+    TPC.LoadCrashPath(Options.CrashPathFile);
+  }
+
   ReadAndExecuteSeedCorpora(CorporaFiles);
   DFT.Clear();  // No need for DFT any more.
   TPC.SetPrintNewPCs(Options.PrintNewCovPcs);

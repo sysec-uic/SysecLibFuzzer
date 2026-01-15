@@ -121,6 +121,22 @@ class TracePC {
   void SetFocusFunctions(const std::string &FuncNames);
   size_t CountObservedFocusFunctions();
 
+  // Path tracing with call counting
+  struct FunctionCallInstance {
+    std::string func_name;
+    size_t call_id;        // 1st, 2nd, 3rd... call to this function
+    size_t basic_block_id; // Which basic block was executed
+  };
+
+  void StartPathRecording();
+  void StopPathRecording();
+  void RecordFunctionCall(const std::string &FuncName, size_t BasicBlockID);
+  void SetTriggerPoint(const std::string &FuncName, size_t CallID);
+  void DumpCurrentPath(const uint8_t *Data, size_t Size);
+  const std::vector<FunctionCallInstance>& GetCurrentPath() const { return CurrentExecutionPath; }
+  void LoadCrashPath(const std::string &FilePath);
+  size_t ComputePathDistance() const;
+
   struct PCTableEntry {
     uintptr_t PC, PCFlags;
   };
@@ -176,6 +192,17 @@ private:
   // keep track of the number of functions
   uint8_t *FocusFunctionCounterPtr = nullptr;
   std::vector<uint8_t *> FocusFunctionsCounterPtrs;
+
+  // Path tracing state
+  bool IsRecordingPath = false;
+  bool IsActivated = false;
+  std::string TriggerFunctionName;
+  size_t TriggerCallID = 0;
+  std::map<std::string, size_t> FunctionCallCounts;
+  std::vector<FunctionCallInstance> CurrentExecutionPath;
+  std::vector<FunctionCallInstance> CrashPath;
+  std::string TraceOutputDir;
+  std::map<uint8_t*, std::string> CounterToFuncName;  // Map counter ptr -> function name
 
   ValueBitMap ValueProfileMap;
   uintptr_t InitialStack;

@@ -188,13 +188,22 @@ FUZZER_FLAG_STRING(focus_function, "Experimental. "
      "If -focus_function=auto and -data_flow_trace is used, libFuzzer "
      "will choose the focus functions automatically. Disables -entropic when "
      "specified.")
-//adding def of foucs_functions here, similar to a single function     
+//adding def of foucs_functions here, similar to a single function
 FUZZER_FLAG_STRING(focus_functions, "Experimental. "
      "Comma-separated list of functions to focus on. "
      "Fuzzing will prioritize inputs that hit more of these functions. "
      "Example: -focus_functions=func1,func2,func3. "
      "Inputs hitting more functions get higher priority. Disables -entropic when "
      "specified.")
+FUZZER_FLAG_STRING(trace_output_dir, "Directory to dump execution path traces. "
+     "Use with -focus_functions to record detailed call sequences with call IDs.")
+FUZZER_FLAG_STRING(trigger_point, "Start recording execution trace when this "
+     "function is hit at specific call number. Format: function_name:call_id. "
+     "Example: -trigger_point=validate_input:7 activates tracing at the 7th call.")
+FUZZER_FLAG_STRING(crash_path_file, "Path to JSON file containing crash execution "
+     "path. Fuzzer will prioritize inputs with paths close to this crash path.")
+FUZZER_FLAG_INT(path_distance_threshold, 10, "Maximum path distance from crash "
+     "path to keep inputs. Lower values focus more on crash-like paths.")
 FUZZER_FLAG_INT(entropic, 1, "Enables entropic power schedule.")
 FUZZER_FLAG_INT(entropic_feature_frequency_threshold, 0xFF, "Experimental. If "
      "entropic is enabled, all features which are observed less often than "
