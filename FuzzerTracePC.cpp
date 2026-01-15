@@ -171,9 +171,25 @@ void TracePC::UpdateObservedPCs() {
   };
 
   auto Observe = [&](const PCTableEntry *TE) {
-    if (PcIsFuncEntry(TE))
+    if (PcIsFuncEntry(TE)) {
       if (++ObservedFuncs[TE->PC] == 1 && NumPrintNewFuncs)
         CoveredFuncs.push_back(TE->PC);
+
+      // Record function call for path tracing if active
+      if (IsRecordingPath || !TriggerFunctionName.empty()) {
+        // Check if this is a focus function we're tracking
+        for (size_t i = 0; i < NumModules; i++) {
+          uint8_t *CounterPtr = Modules[i].Start() +
+                                (TE - ModulePCTable[i].Start);
+          auto it = CounterToFuncName.find(CounterPtr);
+          if (it != CounterToFuncName.end()) {
+            // This is a tracked function - record the call
+            RecordFunctionCall(it->second, PCTableEntryIdx(TE));
+            break;
+          }
+        }
+      }
+    }
     ObservePC(TE);
   };
 
@@ -281,6 +297,8 @@ void TracePC::SetFocusFunction(const std::string &FuncName) {
       if (FuncName != Name) continue;
       Printf("INFO: Focus function is set to '%s'\n", Name.c_str());
       FocusFunctionCounterPtr = Modules[M].Start() + I;
+      // Store mapping for path recording
+      CounterToFuncName[FocusFunctionCounterPtr] = FuncName;
       return;
     }
     Printf("  DEBUG: Module %zu has %zu function entries\n", M, FuncCount);
@@ -355,7 +373,10 @@ void TracePC::SetFocusFunctions(const std::string &FuncNames) {
           Printf("  DEBUG: Found function #%zu: '%s'\n", FuncCount, Name.c_str());
         if (FuncName != Name) continue;
         Printf("INFO: Focus function %zu: '%s'\n", FocusFunctionsCounterPtrs.size() + 1, Name.c_str());
-        FocusFunctionsCounterPtrs.push_back(Modules[M].Start() + I);
+        uint8_t *CounterPtr = Modules[M].Start() + I;
+        FocusFunctionsCounterPtrs.push_back(CounterPtr);
+        // Store mapping for path recording
+        CounterToFuncName[CounterPtr] = FuncName;
         Found = true;
         break;
       }
@@ -383,6 +404,139 @@ size_t TracePC::CountObservedFocusFunctions() {
       Count++;
   }
   return Count;
+}
+
+// ===== Path Tracing with Call Counting Implementation =====
+
+void TracePC::SetTriggerPoint(const std::string &FuncName, size_t CallID) {
+  TriggerFunctionName = FuncName;
+  TriggerCallID = CallID;
+  Printf("INFO: Trigger point set to '%s' call #%zu\n", FuncName.c_str(), CallID);
+}
+
+void TracePC::StartPathRecording() {
+  IsRecordingPath = true;
+  FunctionCallCounts.clear();
+  CurrentExecutionPath.clear();
+  Printf("INFO: Path recording started\n");
+}
+
+void TracePC::StopPathRecording() {
+  IsRecordingPath = false;
+}
+
+void TracePC::RecordFunctionCall(const std::string &FuncName, size_t BasicBlockID) {
+  // Check if we should activate tracing (trigger point logic)
+  if (!IsActivated) {
+    FunctionCallCounts[FuncName]++;
+    if (FuncName == TriggerFunctionName &&
+        FunctionCallCounts[FuncName] == TriggerCallID) {
+      IsActivated = true;
+      Printf("INFO: Tracing activated at %s call #%zu\n",
+             FuncName.c_str(), TriggerCallID);
+      // Reset counters to start fresh from this point
+      FunctionCallCounts.clear();
+      CurrentExecutionPath.clear();
+      IsRecordingPath = true;
+    }
+    if (!IsActivated) return;  // Not activated yet
+  }
+
+  if (!IsRecordingPath) return;
+
+  // Increment call counter for this function
+  FunctionCallCounts[FuncName]++;
+
+  // Record this call instance
+  FunctionCallInstance call;
+  call.func_name = FuncName;
+  call.call_id = FunctionCallCounts[FuncName];
+  call.basic_block_id = BasicBlockID;
+
+  CurrentExecutionPath.push_back(call);
+}
+
+void TracePC::DumpCurrentPath(const uint8_t *Data, size_t Size) {
+  if (TraceOutputDir.empty() || CurrentExecutionPath.empty()) return;
+
+  // Compute hash of input
+  uint64_t Hash = SimpleFastHash(Data, Size, 0);
+  char HashStr[32];
+  snprintf(HashStr, sizeof(HashStr), "%016llx", (unsigned long long)Hash);
+
+  std::string Filename = TraceOutputDir + "/" + std::string(HashStr) + ".json";
+  FILE *F = fopen(Filename.c_str(), "w");
+  if (!F) {
+    Printf("WARNING: Failed to open trace file: %s\n", Filename.c_str());
+    return;
+  }
+
+  fprintf(F, "{\n");
+  fprintf(F, "  \"input_hash\": \"%s\",\n", HashStr);
+  fprintf(F, "  \"input_size\": %zu,\n", Size);
+  fprintf(F, "  \"path\": [\n");
+
+  for (size_t i = 0; i < CurrentExecutionPath.size(); i++) {
+    const auto &call = CurrentExecutionPath[i];
+    fprintf(F, "    {\"func\": \"%s\", \"call_id\": %zu, \"bb\": %zu}",
+            call.func_name.c_str(), call.call_id, call.basic_block_id);
+    if (i < CurrentExecutionPath.size() - 1) fprintf(F, ",");
+    fprintf(F, "\n");
+  }
+
+  fprintf(F, "  ]\n");
+  fprintf(F, "}\n");
+  fclose(F);
+}
+
+void TracePC::LoadCrashPath(const std::string &FilePath) {
+  FILE *F = fopen(FilePath.c_str(), "r");
+  if (!F) {
+    Printf("ERROR: Failed to open crash path file: %s\n", FilePath.c_str());
+    exit(1);
+  }
+
+  CrashPath.clear();
+
+  // Simple JSON parser for our format
+  char line[4096];
+  while (fgets(line, sizeof(line), F)) {
+    // Look for lines like: {"func": "name", "call_id": N, "bb": M}
+    if (strstr(line, "\"func\"")) {
+      FunctionCallInstance call;
+      char func_name[256];
+      if (sscanf(line, " {\"func\": \"%255[^\"]\", \"call_id\": %zu, \"bb\": %zu}",
+                 func_name, &call.call_id, &call.basic_block_id) == 3) {
+        call.func_name = func_name;
+        CrashPath.push_back(call);
+      }
+    }
+  }
+  fclose(F);
+
+  Printf("INFO: Loaded crash path with %zu function calls\n", CrashPath.size());
+}
+
+size_t TracePC::ComputePathDistance() const {
+  if (CrashPath.empty()) return 0;
+
+  size_t Distance = 0;
+  size_t MinLen = std::min(CurrentExecutionPath.size(), CrashPath.size());
+
+  // Compare paths element by element
+  for (size_t i = 0; i < MinLen; i++) {
+    const auto &current = CurrentExecutionPath[i];
+    const auto &crash = CrashPath[i];
+
+    if (current.func_name != crash.func_name || current.call_id != crash.call_id) {
+      Distance++;
+    }
+  }
+
+  // Add difference in path lengths
+  Distance += std::abs((int)CurrentExecutionPath.size() - (int)CrashPath.size());
+
+  return Distance;
 }
 
 void TracePC::PrintCoverage(bool PrintAllCounters) {

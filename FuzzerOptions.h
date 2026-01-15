@@ -58,7 +58,11 @@ struct FuzzingOptions {
   std::string ExitOnItem;
   std::string FocusFunction;
   // this is added newly for sysec-libfuzzer
-  std::string FocusFunctions; 
+  std::string FocusFunctions;
+  std::string TraceOutputDir;
+  std::string TriggerPoint;
+  std::string CrashPathFile;
+  int PathDistanceThreshold = 10;
   std::string DataFlowTrace;
   std::string CollectDataFlow;
   std::string FeaturesDir;
