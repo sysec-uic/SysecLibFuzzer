@@ -1,6 +1,5 @@
 #!/bin/sh
 LIBFUZZER_SRC_DIR=$(dirname $0)
---DCOMPILER_RT_BUILD_LIBFUZZER=ON
 CXX="${CXX:-clang}"
 for f in $LIBFUZZER_SRC_DIR/*.cpp; do
   $CXX -g -O2 -fno-omit-frame-pointer -std=c++17 $f -c &
