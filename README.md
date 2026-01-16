@@ -4,8 +4,9 @@ Extension 1)
 multi_foucs_function Fuzzing:-
 An extension of LibFuzzer. Currently supports a new fuzzing flag --foucs_functions, which extends a single function-aware fuzzing into fuzzing many functions at once. 
 The goal is to generate fuzzing tests targeting locations known to trigger crashes/bugs. The flags are still under testing 
-
-(works for small fuzz harness, and porting to an OSS-Fuzz discovered bugs is: ``in progress``)  
+Update: ported well into ARVO (libxml2). The Flags seem stable, but it's not clear how accurate they are. 
+This needs further investigation, ensuring that the flags and the path-aware fuzzing are functional 
+(works for small fuzz harness, and porting to an OSS-Fuzz discovered bugs is: ~~``in progress``~~) 
 
 
 Extension 2 updated) 
