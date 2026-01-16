@@ -14,7 +14,8 @@
 #include "FuzzerDefs.h"
 #include "FuzzerDictionary.h"
 #include "FuzzerValueBitMap.h"
-
+#include <map>
+#include <map>
 #include <set>
 #include <unordered_map>
 
@@ -68,6 +69,7 @@ struct MemMemTable {
 };
 
 class TracePC {
+  friend class Fuzzer;
  public:
   void HandleInline8bitCountersInit(uint8_t *Start, uint8_t *Stop);
   void HandlePCsInit(const uintptr_t *Start, const uintptr_t *Stop);
