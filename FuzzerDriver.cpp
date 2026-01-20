@@ -777,6 +777,9 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
   if (Flags.crash_path_file)
     Options.CrashPathFile = Flags.crash_path_file;
   Options.PathDistanceThreshold = Flags.path_distance_threshold;
+  Options.TraceOnlyOnCorpus = Flags.trace_only_on_corpus;
+  Options.FocusRequireHit = Flags.focus_require_hit;
+  Options.FocusAddIfHit = Flags.focus_add_if_hit;
   if (Flags.data_flow_trace)
     Options.DataFlowTrace = Flags.data_flow_trace;
   if (Flags.features_dir) {

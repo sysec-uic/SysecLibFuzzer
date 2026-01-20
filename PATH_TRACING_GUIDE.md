@@ -9,6 +9,15 @@ This implementation adds path-aware fuzzing with call-instance tracking to libFu
 3. **Compare paths to crash paths** and prioritize similar inputs
 4. **Dump detailed traces** for offline analysis
 
+## Flag Quick Reference (new)
+
+- `-focus_functions=func1,func2,...` (required): functions we track; tracing ignores everything else. Names must match symbolized names (see `nm`/`llvm-symbolizer` output). Disables entropic schedule just like `-focus_function`.
+- `-trace_output_dir=/path` (recommended): turn on path recording and dump JSON traces there when new corpus items are added.
+- `-trigger_point=func:call_id` (optional): start recording only at the Nth call to `func` (1-based). Without it, recording starts immediately.
+- `-crash_path_file=/path/to/json` (optional): load a reference crash trace (produced by `-trace_output_dir`) and prefer inputs similar to it.
+- `-path_distance_threshold=N` (default 10): when a crash path is loaded, drop inputs whose path distance exceeds N.
+- Legacy single-function mode still exists: `-focus_function=name` (but path tracing is designed for `-focus_functions`).
+
 ## Files Modified
 
 ### 1. FuzzerFlags.def
@@ -48,6 +57,12 @@ Wire up new flags to Options struct
 - Dump traces and filter by distance in corpus update
 
 ## Usage Examples
+
+### Activation Checklist
+- Build with symbols (`-g`) so function names survive and match your `-focus_functions` list.
+- Always pass `-focus_functions=...` when using path tracing; tracing only records those functions.
+- Add `-trace_output_dir=/path` to actually emit traces.
+- Optional: add `-trigger_point` to delay tracing, and `-crash_path_file`/`-path_distance_threshold` to bias toward a known crash path.
 
 ### Example 1: Record All Execution Paths
 

@@ -23,6 +23,7 @@
 #include "FuzzerUtil.h"
 #include "FuzzerValueBitMap.h"
 #include <set>
+#include <unordered_set>
 
 // Used by -fsanitize-coverage=stack-depth to track stack depth
 ATTRIBUTES_INTERFACE_TLS_INITIAL_EXEC uintptr_t __sancov_lowest_stack;
@@ -425,6 +426,15 @@ void TracePC::StopPathRecording() {
   IsRecordingPath = false;
 }
 
+void TracePC::ResetPathForNewInput() {
+  FunctionCallCounts.clear();
+  CurrentExecutionPath.clear();
+  // Trigger-based activation is per-input, not cumulative.
+  IsActivated = TriggerFunctionName.empty();
+  // If guard-based tracing is enabled, we rely on per-call hooks; otherwise
+  // the counter-based path recorder will run after execution.
+}
+
 void TracePC::RecordFunctionCall(const std::string &FuncName, size_t BasicBlockID) {
   // Check if we should activate tracing (trigger point logic)
   if (!IsActivated) {
@@ -701,6 +711,7 @@ void WarnAboutDeprecatedInstrumentation(const char *flag) {
 extern "C" {
 ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL
+__attribute__((no_sanitize("coverage")))
 void __sanitizer_cov_trace_pc_guard(uint32_t *Guard) {
   fuzzer::WarnAboutDeprecatedInstrumentation(
       "-fsanitize-coverage=trace-pc-guard");
@@ -715,6 +726,8 @@ void __sanitizer_cov_trace_pc() {
 }
 
 ATTRIBUTE_INTERFACE
+ATTRIBUTE_NO_SANITIZE_ALL
+__attribute__((no_sanitize("coverage")))
 void __sanitizer_cov_trace_pc_guard_init(uint32_t *Start, uint32_t *Stop) {
   fuzzer::WarnAboutDeprecatedInstrumentation(
       "-fsanitize-coverage=trace-pc-guard");

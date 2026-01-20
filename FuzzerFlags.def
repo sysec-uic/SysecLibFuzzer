@@ -204,6 +204,12 @@ FUZZER_FLAG_STRING(crash_path_file, "Path to JSON file containing crash executio
      "path. Fuzzer will prioritize inputs with paths close to this crash path.")
 FUZZER_FLAG_INT(path_distance_threshold, 10, "Maximum path distance from crash "
      "path to keep inputs. Lower values focus more on crash-like paths.")
+FUZZER_FLAG_INT(trace_only_on_corpus, 0, "If 1, dump traces only when an input is "
+     "added to the corpus (crash/exit still dump). Reduces trace file volume.")
+FUZZER_FLAG_INT(focus_require_hit, 0, "If 1, reject inputs that do not hit any "
+     "focus_functions. Helps direct fuzzing toward target functions.")
+FUZZER_FLAG_INT(focus_add_if_hit, 0, "If 1, allow inputs that hit focus_functions "
+     "to be kept even without new coverage (force-add when they touch targets).")
 FUZZER_FLAG_INT(entropic, 1, "Enables entropic power schedule.")
 FUZZER_FLAG_INT(entropic_feature_frequency_threshold, 0xFF, "Experimental. If "
      "entropic is enabled, all features which are observed less often than "

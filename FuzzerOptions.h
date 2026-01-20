@@ -63,6 +63,9 @@ struct FuzzingOptions {
   std::string TriggerPoint;
   std::string CrashPathFile;
   int PathDistanceThreshold = 10;
+  bool TraceOnlyOnCorpus = false;
+  bool FocusRequireHit = false;
+  bool FocusAddIfHit = false;
   std::string DataFlowTrace;
   std::string CollectDataFlow;
   std::string FeaturesDir;
