@@ -133,6 +133,8 @@ class TracePC {
   void StopPathRecording();
   void RecordFunctionCall(const std::string &FuncName, size_t BasicBlockID);
   void SetTriggerPoint(const std::string &FuncName, size_t CallID);
+  // Reset per-input tracing state (call counts, current path, activation)
+  void ResetPathForNewInput();
   void DumpCurrentPath(const uint8_t *Data, size_t Size);
   const std::vector<FunctionCallInstance>& GetCurrentPath() const { return CurrentExecutionPath; }
   void LoadCrashPath(const std::string &FilePath);

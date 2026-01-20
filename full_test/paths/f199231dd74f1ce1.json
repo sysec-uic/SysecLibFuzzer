@@ -1,0 +1,11 @@
+{
+  "input_hash": "f199231dd74f1ce1",
+  "input_size": 3757,
+  "path": [
+    {"func": "xmlSAX2StartElementNs", "call_id": 1, "bb": 2552},
+    {"func": "xmlSAX2AttributeNs", "call_id": 1, "bb": 2648},
+    {"func": "xmlIsID", "call_id": 1, "bb": 8455},
+    {"func": "xmlTextReaderStartElementNs", "call_id": 1, "bb": 15759},
+    {"func": "xmlParseStartTag2", "call_id": 1, "bb": 46109}
+  ]
+}

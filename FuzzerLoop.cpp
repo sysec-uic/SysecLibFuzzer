@@ -188,6 +188,12 @@ void Fuzzer::DumpCurrentUnit(const char *Prefix) {
 
 NO_SANITIZE_MEMORY
 void Fuzzer::DeathCallback() {
+  if (!Options.TraceOutputDir.empty()) {
+    // Best-effort crash trace: record any pending PCs and dump current path.
+    TPC.UpdateObservedPCs();
+    if (CurrentUnitData)
+      TPC.DumpCurrentPath(CurrentUnitData, CurrentUnitSize);
+  }
   DumpCurrentUnit("crash-");
   PrintFinalStats();
 }
@@ -227,6 +233,12 @@ void Fuzzer::CrashCallback() {
   if (EF->__sanitizer_acquire_crash_state &&
       !EF->__sanitizer_acquire_crash_state())
     return;
+  if (!Options.TraceOutputDir.empty()) {
+    // Best-effort crash trace: record any pending PCs and dump current path.
+    TPC.UpdateObservedPCs();
+    if (CurrentUnitData)
+      TPC.DumpCurrentPath(CurrentUnitData, CurrentUnitSize);
+  }
   Printf("==%lu== ERROR: libFuzzer: deadly signal\n", GetPid());
   PrintStackTrace();
   Printf("NOTE: libFuzzer has rudimentary signal handlers.\n"
@@ -244,6 +256,12 @@ void Fuzzer::ExitCallback() {
   if (EF->__sanitizer_acquire_crash_state &&
       !EF->__sanitizer_acquire_crash_state())
     return;
+  if (!Options.TraceOutputDir.empty()) {
+    // Best-effort trace for abnormal exits.
+    TPC.UpdateObservedPCs();
+    if (CurrentUnitData)
+      TPC.DumpCurrentPath(CurrentUnitData, CurrentUnitSize);
+  }
   Printf("==%lu== ERROR: libFuzzer: fuzz target exited\n", GetPid());
   PrintStackTrace();
   Printf("SUMMARY: libFuzzer: fuzz target exited\n");
@@ -513,6 +531,10 @@ bool Fuzzer::RunOne(const uint8_t *Data, size_t Size, bool MayDeleteFile,
   // Largest input length should be INT_MAX.
   assert(Size < std::numeric_limits<uint32_t>::max());
 
+  const bool TraceRecording = !Options.TraceOutputDir.empty();
+  if (TraceRecording)
+    TPC.ResetPathForNewInput();
+
   if(!ExecuteCallback(Data, Size)) return false;
   auto TimeOfUnit = duration_cast<microseconds>(UnitStopTime - UnitStartTime);
 
@@ -533,27 +555,57 @@ bool Fuzzer::RunOne(const uint8_t *Data, size_t Size, bool MayDeleteFile,
     *FoundUniqFeatures = FoundUniqFeaturesOfII;
   PrintPulseAndReportSlowInput(Data, Size);
   size_t NumNewFeatures = Corpus.NumFeatureUpdates() - NumUpdatesBefore;
-  if (NumNewFeatures || ForceAddToCorpus) {
+
+  // Update observed PCs to record paths / focus hits even when no new features
+  // were found (optional, controlled by flags).
+  bool ObservedPCsUpdated = false;
+  const bool NeedFocusBias = Options.FocusRequireHit || Options.FocusAddIfHit;
+  if (TraceRecording || NeedFocusBias) {
     TPC.UpdateObservedPCs();
-    size_t NumFocusFunctionsHit = TPC.CountObservedFocusFunctions();
+    ObservedPCsUpdated = true;
+  }
 
-    // Dump execution path if tracing is active
-    if (!Options.TraceOutputDir.empty() && TPC.IsRecordingPath) {
+  size_t NumFocusFunctionsHit = ObservedPCsUpdated ? TPC.CountObservedFocusFunctions() : 0;
+  if (Options.FocusRequireHit && NumFocusFunctionsHit == 0) {
+    // Skip inputs that don't touch any focus function when required.
+    if (TraceRecording && TPC.IsRecordingPath && !Options.TraceOnlyOnCorpus)
       TPC.DumpCurrentPath(Data, Size);
-    }
+    return false;
+  }
 
-    // Compute path distance from crash if crash path is loaded
-    size_t PathDistance = TPC.ComputePathDistance();
+  // Compute path distance from crash if crash path is loaded
+  size_t PathDistance = (TraceRecording && !Options.CrashPathFile.empty())
+                            ? TPC.ComputePathDistance()
+                            : 0;
+
+  bool ForceAdd = ForceAddToCorpus;
+  if (Options.FocusAddIfHit && NumFocusFunctionsHit > 0)
+    ForceAdd = true;
+
+  if (NumNewFeatures || ForceAdd) {
+    if (!ObservedPCsUpdated) {
+      TPC.UpdateObservedPCs();
+      ObservedPCsUpdated = true;
+    }
+    NumFocusFunctionsHit = TPC.CountObservedFocusFunctions();
 
     // Only keep inputs within threshold distance from crash path
-    if (!Options.CrashPathFile.empty() &&
+    if (TraceRecording && !Options.CrashPathFile.empty() &&
         PathDistance > (size_t)Options.PathDistanceThreshold) {
+      if (TraceRecording && TPC.IsRecordingPath && !Options.TraceOnlyOnCorpus)
+        TPC.DumpCurrentPath(Data, Size);
       return false;  // Skip this input - too far from crash path
+    }
+
+    // Dump execution path if tracing is active (and allowed by policy)
+    if (TraceRecording && TPC.IsRecordingPath &&
+        (!Options.TraceOnlyOnCorpus)) {
+      TPC.DumpCurrentPath(Data, Size);
     }
 
     auto NewII =
         Corpus.AddToCorpus({Data, Data + Size}, NumNewFeatures, MayDeleteFile,
-                           TPC.ObservedFocusFunction(), ForceAddToCorpus,
+                           TPC.ObservedFocusFunction(), ForceAdd,
                            TimeOfUnit, UniqFeatureSetTmp, DFT, II,
                            NumFocusFunctionsHit);
     WriteFeatureSetToFile(Options.FeaturesDir, Sha1ToString(NewII->Sha1),
@@ -571,6 +623,10 @@ bool Fuzzer::RunOne(const uint8_t *Data, size_t Size, bool MayDeleteFile,
     RenameFeatureSetFile(Options.FeaturesDir, OldFeaturesFile,
                          Sha1ToString(II->Sha1));
     return true;
+  }
+  // Even if we didn't add to corpus, emit trace for debugging when requested.
+  if (TraceRecording && TPC.IsRecordingPath && !Options.TraceOnlyOnCorpus) {
+    TPC.DumpCurrentPath(Data, Size);
   }
   return false;
 }
@@ -886,7 +942,12 @@ void Fuzzer::Loop(std::vector<SizedFile> &CorporaFiles) {
   DFT.Init(Options.DataFlowTrace, &FocusFunctionOrAuto, CorporaFiles,
            MD.GetRand());
   TPC.SetFocusFunction(FocusFunctionOrAuto);
-  TPC.SetFocusFunctions(Options.FocusFunctions);
+  // Path tracing expects focus functions; if only -focus_function is provided,
+  // reuse it for the multi-function path tracer.
+  std::string FocusFunctionsForTracing = Options.FocusFunctions;
+  if (FocusFunctionsForTracing.empty() && !Options.FocusFunction.empty())
+    FocusFunctionsForTracing = Options.FocusFunction;
+  TPC.SetFocusFunctions(FocusFunctionsForTracing);
 
   // Initialize path tracing if requested
   if (!Options.TraceOutputDir.empty()) {
