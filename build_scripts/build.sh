@@ -1,15 +1,26 @@
 #!/bin/sh
-LIBFUZZER_SRC_DIR=$(dirname $0)
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+LIBFUZZER_SRC_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
+cd "$LIBFUZZER_SRC_DIR"
 # Default to the C++ compiler so standard library headers are found
 CXX="${CXX:-clang++}"
+# XRay instrumentation for libFuzzer itself is optional and usually unnecessary.
+# Keeping libFuzzer uninstrumented avoids recursion hazards in the XRay handler
+# and keeps traces focused on the target.
+XRAY_FLAGS=""
+if [ "${ENABLE_XRAY:-0}" = "1" ]; then
+  XRAY_FLAGS="${XRAY_FLAGS:--fxray-instrument -fxray-instruction-threshold=1}"
+fi
 # Opt-in flag: set USE_LIBCXX=1 to build against libc++; otherwise libstdc++ is used.
 STD_LIB_FLAGS=""
 if [ "${USE_LIBCXX:-0}" = "1" ]; then
   STD_LIB_FLAGS="-stdlib=libc++"
 fi
 
-# Fallback include search path for libstdc++/libc++ headers when clang picks a
-# GCC version whose headers are not installed.
+# Fallback: if clang selects a GCC version without headers installed (common on
+# minimal images), point it at the newest libstdc++ headers we can find.
 STDINC_FLAGS="${STDINC_FLAGS:-}"
 if [ -z "$STDINC_FLAGS" ]; then
   if [ "${USE_LIBCXX:-0}" = "1" ]; then
@@ -29,10 +40,7 @@ fi
 
 for f in $LIBFUZZER_SRC_DIR/*.cpp; do
   $CXX -g -O2 -fno-omit-frame-pointer -std=c++17 \
-    -O1 -fno-omit-frame-pointer -gline-tables-only \
-    -DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION \
-    $STD_LIB_FLAGS $STDINC_FLAGS -fsanitize=address -pthread \
-    $f -c &
+    $STD_LIB_FLAGS $STDINC_FLAGS $XRAY_FLAGS $f -c &
 done
 wait
 rm -f libFuzzer.a

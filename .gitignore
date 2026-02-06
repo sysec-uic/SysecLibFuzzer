@@ -8,6 +8,8 @@ docker/
 *.swp
 # Test outputs just in case
 corpus/
+tests_data/paths
+tests_data/*/*
 corpus_*/
 crash-*
 leak-*

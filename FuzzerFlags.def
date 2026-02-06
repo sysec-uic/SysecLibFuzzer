@@ -197,6 +197,8 @@ FUZZER_FLAG_STRING(focus_functions, "Experimental. "
      "specified.")
 FUZZER_FLAG_STRING(trace_output_dir, "Directory to dump execution path traces. "
      "Use with -focus_functions to record detailed call sequences with call IDs.")
+FUZZER_FLAG_STRING(xray_trace_output_dir, "Directory to dump XRay function "
+     "trace JSON files. Requires target built with -fxray-instrument.")
 FUZZER_FLAG_STRING(trigger_point, "Start recording execution trace when this "
      "function is hit at specific call number. Format: function_name:call_id. "
      "Example: -trigger_point=validate_input:7 activates tracing at the 7th call.")
@@ -206,6 +208,8 @@ FUZZER_FLAG_INT(path_distance_threshold, 10, "Maximum path distance from crash "
      "path to keep inputs. Lower values focus more on crash-like paths.")
 FUZZER_FLAG_INT(trace_only_on_corpus, 0, "If 1, dump traces only when an input is "
      "added to the corpus (crash/exit still dump). Reduces trace file volume.")
+FUZZER_FLAG_INT(xray_trace_only_on_corpus, 0, "If 1, dump XRay traces only when "
+     "an input is added to the corpus. Default 0 dumps per execution.")
 FUZZER_FLAG_INT(focus_require_hit, 0, "If 1, reject inputs that do not hit any "
      "focus_functions. Helps direct fuzzing toward target functions.")
 FUZZER_FLAG_INT(focus_add_if_hit, 0, "If 1, allow inputs that hit focus_functions "

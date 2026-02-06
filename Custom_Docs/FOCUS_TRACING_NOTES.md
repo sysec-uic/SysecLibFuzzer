@@ -21,11 +21,14 @@
 - `-trace_output_dir` enables JSON dumps; file count depends on `-trace_only_on_corpus`.
 - Paths include only functions listed in `-focus_functions` (or `-focus_function` reused).
 - `-crash_path_file` + `-path_distance_threshold` filter corpus additions by similarity to a reference path.
+- XRay tracing (optional): full function-entry sequence across all instrumented functions, independent of focus list.
 
 ## New flags
 - `-trace_only_on_corpus=0|1`: dump traces per exec (0) or only when added to corpus/crash (1).
 - `-focus_require_hit=0|1`: if 1, reject inputs that hit zero focus functions.
 - `-focus_add_if_hit=0|1`: if 1, force-add inputs that hit focus functions even without new coverage.
+- `-xray_trace_output_dir=/path`: dump XRay function-trace JSON (requires target built with `-fxray-instrument`).
+- `-xray_trace_only_on_corpus=0|1`: dump XRay traces per exec (0, default) or only when added to corpus (1).
 
 ## Usage examples
 Record a PoC path (single run, even if it crashes):

@@ -15,6 +15,7 @@
 #include "FuzzerPlatform.h"
 #include "FuzzerRandom.h"
 #include "FuzzerTracePC.h"
+#include "FuzzerXRay.h"
 #include <algorithm>
 #include <cstring>
 #include <memory>
@@ -532,10 +533,22 @@ bool Fuzzer::RunOne(const uint8_t *Data, size_t Size, bool MayDeleteFile,
   assert(Size < std::numeric_limits<uint32_t>::max());
 
   const bool TraceRecording = !Options.TraceOutputDir.empty();
+  const bool XRayRecording = XR.Enabled();
   if (TraceRecording)
     TPC.ResetPathForNewInput();
+  if (XRayRecording)
+    XR.StartNewInput();
 
-  if(!ExecuteCallback(Data, Size)) return false;
+  if(!ExecuteCallback(Data, Size)) {
+    if (XRayRecording) {
+      XR.Stop();
+      if (!XR.TraceOnlyOnCorpus())
+        XR.Dump(Data, Size);
+    }
+    return false;
+  }
+  if (XRayRecording)
+    XR.Stop();
   auto TimeOfUnit = duration_cast<microseconds>(UnitStopTime - UnitStartTime);
 
   UniqFeatureSetTmp.clear();
@@ -570,6 +583,8 @@ bool Fuzzer::RunOne(const uint8_t *Data, size_t Size, bool MayDeleteFile,
     // Skip inputs that don't touch any focus function when required.
     if (TraceRecording && TPC.IsRecordingPath && !Options.TraceOnlyOnCorpus)
       TPC.DumpCurrentPath(Data, Size);
+    if (XRayRecording && !XR.TraceOnlyOnCorpus())
+      XR.Dump(Data, Size);
     return false;
   }
 
@@ -594,6 +609,8 @@ bool Fuzzer::RunOne(const uint8_t *Data, size_t Size, bool MayDeleteFile,
         PathDistance > (size_t)Options.PathDistanceThreshold) {
       if (TraceRecording && TPC.IsRecordingPath && !Options.TraceOnlyOnCorpus)
         TPC.DumpCurrentPath(Data, Size);
+      if (XRayRecording && !XR.TraceOnlyOnCorpus())
+        XR.Dump(Data, Size);
       return false;  // Skip this input - too far from crash path
     }
 
@@ -602,6 +619,8 @@ bool Fuzzer::RunOne(const uint8_t *Data, size_t Size, bool MayDeleteFile,
         (!Options.TraceOnlyOnCorpus)) {
       TPC.DumpCurrentPath(Data, Size);
     }
+    if (XRayRecording && XR.TraceOnlyOnCorpus())
+      XR.Dump(Data, Size);
 
     auto NewII =
         Corpus.AddToCorpus({Data, Data + Size}, NumNewFeatures, MayDeleteFile,
@@ -628,6 +647,8 @@ bool Fuzzer::RunOne(const uint8_t *Data, size_t Size, bool MayDeleteFile,
   if (TraceRecording && TPC.IsRecordingPath && !Options.TraceOnlyOnCorpus) {
     TPC.DumpCurrentPath(Data, Size);
   }
+  if (XRayRecording && !XR.TraceOnlyOnCorpus())
+    XR.Dump(Data, Size);
   return false;
 }
 
@@ -954,6 +975,10 @@ void Fuzzer::Loop(std::vector<SizedFile> &CorporaFiles) {
     TPC.TraceOutputDir = Options.TraceOutputDir;
     MkDirRecursive(Options.TraceOutputDir);
     TPC.StartPathRecording();
+  }
+  if (!Options.XRayTraceOutputDir.empty()) {
+    MkDirRecursive(Options.XRayTraceOutputDir);
+    XR.Initialize(Options.XRayTraceOutputDir, Options.XRayTraceOnlyOnCorpus);
   }
 
   // Parse and set trigger point if specified

@@ -60,10 +60,12 @@ struct FuzzingOptions {
   // this is added newly for sysec-libfuzzer
   std::string FocusFunctions;
   std::string TraceOutputDir;
+  std::string XRayTraceOutputDir;
   std::string TriggerPoint;
   std::string CrashPathFile;
   int PathDistanceThreshold = 10;
   bool TraceOnlyOnCorpus = false;
+  bool XRayTraceOnlyOnCorpus = false;
   bool FocusRequireHit = false;
   bool FocusAddIfHit = false;
   std::string DataFlowTrace;

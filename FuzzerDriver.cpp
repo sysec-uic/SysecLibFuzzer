@@ -772,12 +772,15 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
     Options.FocusFunctions = Flags.focus_functions;
   if (Flags.trace_output_dir)
     Options.TraceOutputDir = Flags.trace_output_dir;
+  if (Flags.xray_trace_output_dir)
+    Options.XRayTraceOutputDir = Flags.xray_trace_output_dir;
   if (Flags.trigger_point)
     Options.TriggerPoint = Flags.trigger_point;
   if (Flags.crash_path_file)
     Options.CrashPathFile = Flags.crash_path_file;
   Options.PathDistanceThreshold = Flags.path_distance_threshold;
   Options.TraceOnlyOnCorpus = Flags.trace_only_on_corpus;
+  Options.XRayTraceOnlyOnCorpus = Flags.xray_trace_only_on_corpus;
   Options.FocusRequireHit = Flags.focus_require_hit;
   Options.FocusAddIfHit = Flags.focus_add_if_hit;
   if (Flags.data_flow_trace)
