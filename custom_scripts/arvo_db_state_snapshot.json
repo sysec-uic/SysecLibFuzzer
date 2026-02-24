@@ -1,0 +1,92 @@
+{
+  "generated_at_utc": "2026-02-20T16:20:27.068418+00:00",
+  "db": "custom_scripts/arvo.db.2.enriched",
+  "summary": {
+    "total_bugs": 6138,
+    "with_crash_output": 6138,
+    "with_patch_url": 6138,
+    "with_fix_commit": 6138
+  },
+  "on_crash_log": {
+    "NULL": 0,
+    "-1": 295,
+    "0": 1789,
+    "1": 4054,
+    "meaning": {
+      "NULL": "not processed yet",
+      "-1": "processed, but patch data could not be fetched/parsing failed",
+      "0": "processed, patch found, but changed files do not match crash-log files",
+      "1": "processed, at least one changed patch file appears in crash log"
+    }
+  },
+  "top": {
+    "projects": [
+      {
+        "name": "imagemagick",
+        "count": 459
+      },
+      {
+        "name": "ffmpeg",
+        "count": 400
+      },
+      {
+        "name": "gdal",
+        "count": 253
+      },
+      {
+        "name": "ndpi",
+        "count": 179
+      },
+      {
+        "name": "ghostpdl",
+        "count": 177
+      }
+    ],
+    "crash_types": [
+      {
+        "name": "Use-of-uninitialized-value",
+        "count": 1183
+      },
+      {
+        "name": "Heap-buffer-overflow READ 1",
+        "count": 824
+      },
+      {
+        "name": "UNKNOWN READ",
+        "count": 553
+      },
+      {
+        "name": "Heap-buffer-overflow READ 4",
+        "count": 260
+      },
+      {
+        "name": "Index-out-of-bounds",
+        "count": 238
+      }
+    ],
+    "sanitizers": [
+      {
+        "name": "asan",
+        "count": 4293
+      },
+      {
+        "name": "msan",
+        "count": 1293
+      },
+      {
+        "name": "ubsan",
+        "count": 552
+      }
+    ],
+    "languages": [
+      {
+        "name": "c++",
+        "count": 5394
+      },
+      {
+        "name": "c",
+        "count": 744
+      }
+    ]
+  }
+}
