@@ -18,6 +18,9 @@
 #include "FuzzerDefs.h"
 #include "FuzzerDictionary.h"
 #include "FuzzerExtFunctions.h"
+#include "FuzzerE9Trace.h"
+#include <dlfcn.h>
+#include <cxxabi.h>
 #include "FuzzerIO.h"
 #include "FuzzerPlatform.h"
 #include "FuzzerUtil.h"
@@ -31,6 +34,36 @@ ATTRIBUTES_INTERFACE_TLS_INITIAL_EXEC uintptr_t __sancov_lowest_stack;
 namespace fuzzer {
 
 TracePC TPC; //from extren TracePC.h
+
+// Try to get a function name for a PC. Uses DescribePC (sanitizer) first,
+// falls back to dladdr + demangling if that fails.
+static std::string GetFunctionName(uintptr_t PC) {
+  auto Name = DescribePC("%F", PC);
+  if (!Name.empty() && Name != "<can not symbolize>") {
+    if (Name[0] == 'i' && Name[1] == 'n' && Name[2] == ' ')
+      Name = Name.substr(3);
+    if (Name.size() >= 2 && Name[Name.size()-2] == '(' && Name[Name.size()-1] == ')')
+      Name = Name.substr(0, Name.size()-2);
+    return Name;
+  }
+  // Fallback: dladdr
+  Dl_info Info;
+  memset(&Info, 0, sizeof(Info));
+  if (dladdr(reinterpret_cast<void *>(PC), &Info) && Info.dli_sname) {
+    int Status = 0;
+    char *Demangled = abi::__cxa_demangle(Info.dli_sname, nullptr, nullptr, &Status);
+    if (Status == 0 && Demangled) {
+      std::string Result(Demangled);
+      free(Demangled);
+      // Strip trailing ()
+      if (Result.size() >= 2 && Result[Result.size()-2] == '(' && Result[Result.size()-1] == ')')
+        Result = Result.substr(0, Result.size()-2);
+      return Result;
+    }
+    return std::string(Info.dli_sname);
+  }
+  return "<unknown>";
+}
 
 size_t TracePC::GetTotalPCCoverage() {
   return ObservedPCs.size();
@@ -286,12 +319,7 @@ void TracePC::SetFocusFunction(const std::string &FuncName) {
     for (size_t I = 0; I < N; I++) {
       if (!(PcIsFuncEntry(&PCTE.Start[I]))) continue;  // not a function entry.
       FuncCount++;
-      auto Name = DescribePC("%F", GetNextInstructionPc(PCTE.Start[I].PC));
-      if (Name[0] == 'i' && Name[1] == 'n' && Name[2] == ' ')
-        Name = Name.substr(3, std::string::npos);
-      // Strip trailing () from function names for matching
-      if (Name.size() >= 2 && Name[Name.size()-2] == '(' && Name[Name.size()-1] == ')')
-        Name = Name.substr(0, Name.size()-2);
+      auto Name = GetFunctionName(GetNextInstructionPc(PCTE.Start[I].PC));
       // Print first 10 functions found for debugging
       if (FuncCount <= 10)
         Printf("  DEBUG: Found function #%zu: '%s'\n", FuncCount, Name.c_str());
@@ -363,12 +391,7 @@ void TracePC::SetFocusFunctions(const std::string &FuncNames) {
       for (size_t I = 0; I < N; I++) {
         if (!(PcIsFuncEntry(&PCTE.Start[I]))) continue;  // not a function entry.
         FuncCount++;
-        auto Name = DescribePC("%F", GetNextInstructionPc(PCTE.Start[I].PC));
-        if (Name[0] == 'i' && Name[1] == 'n' && Name[2] == ' ')
-          Name = Name.substr(3, std::string::npos);
-        // Strip trailing () from function names for matching
-        if (Name.size() >= 2 && Name[Name.size()-2] == '(' && Name[Name.size()-1] == ')')
-          Name = Name.substr(0, Name.size()-2);
+        auto Name = GetFunctionName(GetNextInstructionPc(PCTE.Start[I].PC));
         // Print first few functions found for debugging
         if (FuncCount <= 5 && FocusFunctionsCounterPtrs.empty())
           Printf("  DEBUG: Found function #%zu: '%s'\n", FuncCount, Name.c_str());
@@ -484,6 +507,26 @@ void TracePC::DumpCurrentPath(const uint8_t *Data, size_t Size) {
   fprintf(F, "{\n");
   fprintf(F, "  \"input_hash\": \"%s\",\n", HashStr);
   fprintf(F, "  \"input_size\": %zu,\n", Size);
+
+  // Write input bytes as hex string
+  fprintf(F, "  \"input_hex\": \"");
+  for (size_t i = 0; i < Size; i++)
+    fprintf(F, "%02x", Data[i]);
+  fprintf(F, "\",\n");
+
+  // Write printable ASCII representation
+  fprintf(F, "  \"input_ascii\": \"");
+  for (size_t i = 0; i < Size; i++) {
+    uint8_t c = Data[i];
+    if (c == '"' || c == '\\')
+      fprintf(F, "\\%c", c);
+    else if (c >= 0x20 && c <= 0x7e)
+      fprintf(F, "%c", c);
+    else
+      fprintf(F, "\\x%02x", c);
+  }
+  fprintf(F, "\",\n");
+
   fprintf(F, "  \"path\": [\n");
 
   for (size_t i = 0; i < CurrentExecutionPath.size(); i++) {
@@ -547,6 +590,102 @@ size_t TracePC::ComputePathDistance() const {
   Distance += std::abs((int)CurrentExecutionPath.size() - (int)CrashPath.size());
 
   return Distance;
+}
+
+// ===== e9patch Trace Integration =====
+
+void TracePC::InitE9SymbolTable() {
+  // Compute the PIE base address. We find the runtime address of a known
+  // function via dladdr, then subtract its file offset (from the PC table)
+  // to get the base. This lets us convert static offsets from e9patch
+  // back to runtime addresses.
+  if (NumModules > 0 && Modules[0].Size() > 0) {
+    const PCTableEntry *TE = &ModulePCTable[0].Start[0];
+    uintptr_t StaticPC = TE->PC;
+    uintptr_t RuntimePC = GetNextInstructionPc(TE->PC);
+    Dl_info Info;
+    if (dladdr(reinterpret_cast<void *>(RuntimePC), &Info) && Info.dli_fbase) {
+      e9_trace_buf.base_addr = reinterpret_cast<uintptr_t>(Info.dli_fbase);
+      Printf("INFO: e9 PIE base address: %p\n", Info.dli_fbase);
+    }
+  }
+
+  // For each focus function, compute its static (file) offset from the PC
+  // table. The e9 hook records (static)target which is the file offset.
+  // We store these offsets so CollectE9Trace can match them directly.
+  for (const auto &KV : CounterToFuncName) {
+    for (size_t i = 0; i < NumModules; i++) {
+      size_t Idx = KV.first - Modules[i].Start();
+      if (Idx < Modules[i].Size()) {
+        const PCTableEntry *TE = &ModulePCTable[i].Start[Idx];
+        // TE->PC + 1 gives the static address used by symbolization.
+        // The actual function start is TE->PC itself (or close to it).
+        // For (static)target matching, we need the file offset that a
+        // call instruction would reference. Use dladdr to get the
+        // function start, then subtract base to get the file offset.
+        uintptr_t PC = GetNextInstructionPc(TE->PC);
+        Dl_info Info;
+        if (dladdr(reinterpret_cast<void *>(PC), &Info) && Info.dli_saddr) {
+          uintptr_t RuntimeAddr = reinterpret_cast<uintptr_t>(Info.dli_saddr);
+          uintptr_t StaticOffset = RuntimeAddr - e9_trace_buf.base_addr;
+          e9_trace_add_symbol(StaticOffset, KV.second.c_str());
+          Printf("INFO: e9 symbol '%s' static offset 0x%zx (runtime %p)\n",
+                 KV.second.c_str(), (size_t)StaticOffset, (void *)RuntimeAddr);
+        }
+        break;
+      }
+    }
+  }
+  Printf("INFO: e9 trace symbol table initialized with %u entries\n",
+         e9_trace_buf.num_symbols);
+}
+
+void TracePC::CollectE9Trace() {
+  // Read the shared e9 trace buffer and populate CurrentExecutionPath.
+  // Called after each execution, replaces the counter-based path recording.
+  CurrentExecutionPath.clear();
+  FunctionCallCounts.clear();
+
+  if (e9_trace_buf.num_events == 0)
+    return;
+
+  // Build set of focus function names for filtering.
+  std::set<std::string> FocusNames;
+  for (const auto &KV : CounterToFuncName)
+    FocusNames.insert(KV.second);
+
+  // Build lookup from static offset -> name using the symbol table.
+  // Both the hook ((static)target) and the symbol table store file offsets.
+  std::unordered_map<uintptr_t, std::string> OffsetToName;
+  for (uint32_t i = 0; i < e9_trace_buf.num_symbols; i++)
+    OffsetToName[e9_trace_buf.symbols[i].addr] = e9_trace_buf.symbols[i].name;
+
+  // Compute call_id per function (reset fresh for this input).
+  std::unordered_map<uintptr_t, size_t> PerInputCallCounts;
+
+  for (uint32_t i = 0; i < e9_trace_buf.num_events; i++) {
+    uintptr_t Target = e9_trace_buf.events[i].target;
+
+    // Direct lookup: event target (static offset) == symbol offset.
+    auto it = OffsetToName.find(Target);
+    if (it == OffsetToName.end())
+      continue;  // Not a focus function.
+
+    const std::string &Name = it->second;
+    size_t CallId = ++PerInputCallCounts[Target];
+
+    FunctionCallInstance call;
+    call.func_name = Name;
+    call.call_id = CallId;
+    call.basic_block_id = Target;
+    CurrentExecutionPath.push_back(call);
+  }
+
+  // Stop recording until next e9_trace_reset().
+  e9_trace_buf.active = 0;
+
+  if (e9_trace_buf.overflow)
+    Printf("WARNING: e9 trace buffer overflow, path may be truncated\n");
 }
 
 void TracePC::PrintCoverage(bool PrintAllCounters) {
