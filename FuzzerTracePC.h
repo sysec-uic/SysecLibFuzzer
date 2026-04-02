@@ -122,6 +122,13 @@ class TracePC {
   void SetFocusFunctions(const std::string &FuncNames);
   size_t CountObservedFocusFunctions();
 
+  // e9patch trace integration: read the shared buffer and populate
+  // CurrentExecutionPath with real ordered call data.
+  void CollectE9Trace();
+  // Build symbol table for e9 trace address resolution from the focus
+  // functions list + nm-style symbol info already in CounterToFuncName.
+  void InitE9SymbolTable();
+
   // Path tracing with call counting
   struct FunctionCallInstance {
     std::string func_name;

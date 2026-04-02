@@ -16,6 +16,8 @@
 #include "FuzzerRandom.h"
 #include "FuzzerTracePC.h"
 #include "FuzzerXRay.h"
+#include "FuzzerE9Trace.h"
+#include <dlfcn.h>
 #include <algorithm>
 #include <cstring>
 #include <memory>
@@ -534,8 +536,10 @@ bool Fuzzer::RunOne(const uint8_t *Data, size_t Size, bool MayDeleteFile,
 
   const bool TraceRecording = !Options.TraceOutputDir.empty();
   const bool XRayRecording = XR.Enabled();
-  if (TraceRecording)
+  if (TraceRecording) {
     TPC.ResetPathForNewInput();
+    e9_trace_reset();  // Reset e9patch shared trace buffer
+  }
   if (XRayRecording)
     XR.StartNewInput();
 
@@ -576,6 +580,40 @@ bool Fuzzer::RunOne(const uint8_t *Data, size_t Size, bool MayDeleteFile,
   if (TraceRecording || NeedFocusBias) {
     TPC.UpdateObservedPCs();
     ObservedPCsUpdated = true;
+    // If e9patch tracing is active, replace the counter-based path data
+    // with real ordered call data from the e9 shared buffer.
+    if (TraceRecording) {
+      if (e9_trace_buf.num_events > 0) {
+        TPC.CollectE9Trace();
+        if (Options.Verbosity >= 2) {
+          Printf("DEBUG: e9 trace: %u events, %zu path entries\n",
+                 e9_trace_buf.num_events, TPC.GetCurrentPath().size());
+          // Print first 3 event targets and all symbol addrs for debugging
+          static bool DebugOnce = false;
+          if (!DebugOnce && TPC.GetCurrentPath().empty()
+              && e9_trace_buf.num_events > 0) {
+            DebugOnce = true;
+            Printf("DEBUG: first 5 event targets (dladdr resolved):\n");
+            for (uint32_t i = 0; i < 5 && i < e9_trace_buf.num_events; i++) {
+              Dl_info di;
+              const char *sn = "?";
+              if (dladdr((void *)e9_trace_buf.events[i].target, &di) && di.dli_sname)
+                sn = di.dli_sname;
+              Printf("  event[%u]: target=%p -> %s\n", i,
+                     (void *)e9_trace_buf.events[i].target, sn);
+            }
+            Printf("DEBUG: symbol table (%u entries):\n",
+                   e9_trace_buf.num_symbols);
+            for (uint32_t i = 0; i < e9_trace_buf.num_symbols; i++)
+              Printf("  sym[%u]: addr=%p name=%s\n", i,
+                     (void *)e9_trace_buf.symbols[i].addr,
+                     e9_trace_buf.symbols[i].name);
+          }
+      }
+      } else if (Options.Verbosity >= 2) {
+        Printf("DEBUG: e9 trace buffer empty\n");
+      }
+    }
   }
 
   size_t NumFocusFunctionsHit = ObservedPCsUpdated ? TPC.CountObservedFocusFunctions() : 0;
@@ -975,6 +1013,8 @@ void Fuzzer::Loop(std::vector<SizedFile> &CorporaFiles) {
     TPC.TraceOutputDir = Options.TraceOutputDir;
     MkDirRecursive(Options.TraceOutputDir);
     TPC.StartPathRecording();
+    // Build e9patch symbol table from focus functions for address resolution.
+    TPC.InitE9SymbolTable();
   }
   if (!Options.XRayTraceOutputDir.empty()) {
     MkDirRecursive(Options.XRayTraceOutputDir);
